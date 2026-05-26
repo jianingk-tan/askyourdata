@@ -1,41 +1,58 @@
-# AskYourData 📊
+# AskYourData
 
-> An AI agent that turns plain-English questions into SQL queries, validates them, and explains the results in business terms.
+> An AI agent that turns plain-English business questions into validated SQL queries, executes them safely, and explains the results — with auto-generated charts.
 
-**Live demo:** _add your Streamlit Cloud URL here_
-**Author:** Jianing Tan · [LinkedIn](#) · [Email](mailto:jianing.tan@outlook.com)
+**Live demo:** [URL](https://askyourdata-hefctvtoh5w4kcgrkcmrzh.streamlit.app/)
+**Author:** Jianing Tan · [LinkedIn](www.linkedin.com/in/jianing-tan-7357aa229) · [Email](mailto:jianing.tan@outlook.com)
 
----
-
-## What it does
-
-Ask a question like _"Which 5 customers brought in the most revenue?"_ and the agent will:
-
-1. Decide which tables it needs from the schema
-2. Write a SQLite `SELECT` query
-3. Validate the query against an allowlist (only `SELECT`, no stacked statements, no DDL)
-4. Execute it against a read-only database connection
-5. If the query errored, **self-correct** and try again (true agent loop, not single-shot)
-6. Synthesize the result into a written business insight
-7. Auto-generate the most appropriate chart (bar / line / scatter) based on result shape
-
-The SQL is shown transparently so users can verify the agent's reasoning.
+![AskYourData demo — natural-language question, generated SQL, business insight, and auto-chart](docs/screenshot.png)
 
 ---
 
-## Why I built this
+## What this project demonstrates
 
-I wanted hands-on experience with the patterns that production AI systems actually use:
+A working, deployed AI agent that combines four production-grade patterns into a single ~1,500-line codebase:
 
-- **Tool use / function calling** — not prompting tricks, real structured tool invocation
-- **Agent loops with self-correction** — letting the model see errors and recover, rather than failing on the first bad output
-- **Safety boundaries** — the LLM cannot do anything destructive, by construction
-- **Two-stage reasoning** — separate calls for query generation and insight synthesis
-- **Schema injection** — the model is grounded in the actual database structure rather than guessing table names
+| Pattern | Where to see it |
+|---|---|
+| **Tool use / function calling** with Claude's native API | `src/agent.py` |
+| **True agent loop with self-correction** — failed queries are returned to the model for retry, not silently swallowed | `src/agent.py` (iteration loop) |
+| **Three-layer data defense** — prompt education, schema filtering, result-level stripping | `src/sql_tools.py` + system prompt |
+| **Six-pass data quality audit** with a regeneratable report | `scripts/audit_data.py` → [`AUDIT_REPORT.md`](AUDIT_REPORT.md) |
 
-These are the exact building blocks behind tools like Cursor, Claude Code, and modern enterprise AI assistants.
+No LangChain, no orchestration framework, no vector DB. Just the Anthropic SDK and ~250 lines of agent code. The point was to understand the primitives, not stack abstractions.
 
 ---
+
+## Try these questions in the live demo
+
+Each one exercises a different part of the system:
+
+| Question | What it shows |
+|---|---|
+| _"Which 5 customers brought in the most revenue?"_ | Multi-table joins + auto-aggregation |
+| _"Show me monthly revenue for the most recent 12 months in the data"_ | Time-series reasoning + line chart |
+| _"Which suppliers ship from outside North America?"_ | Geographic filtering + bar chart |
+| _"What's the most expensive product that's currently discontinued?"_ | Tricky type quirk — `Discontinued` is stored as TEXT `'1'`, not boolean |
+
+The data is **Microsoft's classic Northwind sample database** (93 customers, 16K orders, 609K line items), so business semantics are realistic — these aren't toy queries.
+
+---
+
+## How it feels to use
+
+1. You type a question in plain English
+2. The agent decides which tables it needs, writes a SQLite `SELECT`, and runs it
+3. If the query fails, the agent **sees the error and rewrites the query** (up to 5 retries — this is the "agent loop," not single-shot LLM)
+4. Once the query succeeds, the agent writes a written business insight
+5. A chart is auto-generated based on the result shape (bar / line / scatter)
+6. The actual SQL is shown in a collapsible panel — full transparency
+
+The SQL exposure is intentional. AI tools that hide their reasoning aren't trustworthy in business contexts; this one shows its work.
+
+---
+---
+
 
 ## Architecture
 
@@ -45,7 +62,7 @@ These are the exact building blocks behind tools like Cursor, Claude Code, and m
 └────────┬────────┘
          ▼
 ┌──────────────────────┐
-│  Claude (Sonnet 4.6) │  System prompt injects the full schema
+│  Claude Sonnet 4.6   │  System prompt injects the full schema
 │  + tool_use API      │
 └────────┬─────────────┘
          │ generates SQL
@@ -63,31 +80,66 @@ These are the exact building blocks behind tools like Cursor, Claude Code, and m
          │ final answer
          ▼
 ┌──────────────────────┐
-│  Streamlit UI        │  Insight + table + auto-chart + SQL transparency
+│  Streamlit UI        │  Insight + auto-chart + data table + SQL transparency
 │  (app.py)            │
 └──────────────────────┘
 ```
 
----
-
 ## Tech stack
 
-- **Python 3.11+**
-- **Anthropic Python SDK** (Claude with tool use)
-- **SQLite** + **sqlparse** for validation
-- **Streamlit** for the UI
-- **Plotly** for auto-visualization
-- **pandas** for data handling
+Python 3.11+ · Anthropic Python SDK · SQLite + sqlparse · Streamlit · Plotly · pandas
 
-No LangChain, no vector DBs, no orchestration framework — just the Anthropic SDK and a clean agent loop, ~250 lines of agent code total.
+Deployed on **Streamlit Community Cloud**. The 24 MB Northwind database is downloaded on first launch (kept out of git to follow real-world conventions where large datasets live in cloud storage, not version control).
 
----
+## Data engineering — what I audited and what I deliberately left alone
+
+The Northwind dataset isn't perfectly clean. Before connecting the agent, I ran a [six-pass audit](AUDIT_REPORT.md) covering structural integrity, BLOB risk, NULL distribution, type quirks, referential integrity, and business rules.
+
+Findings summary: **🚨 2 HIGH · ⚠️ 4 MEDIUM · ℹ️ 7 INFO · ✅ 7 OK**
+
+Re-run the audit any time:
+
+```bash
+python scripts/audit_data.py              # terminal output
+python scripts/audit_data.py --markdown   # regenerate AUDIT_REPORT.md
+```
+
+### Three-layer defense (not one-time cleaning)
+
+Instead of mutating the source data, I addressed issues at three different layers:
+
+| Layer | Mechanism | Example |
+|---|---|---|
+| **Prompt** | Agent is told about quirks upfront | "`Order Details` table has a space — quote it"; "`Discontinued` is TEXT `'0'`/`'1'`, not boolean"; "data ends 2023-10-28" |
+| **Schema** | Tables and columns hidden from the agent | Empty `CustomerDemographics` table; `Photo` and `Picture` BLOB columns (10-12 KB per row each) |
+| **Result** | Final filter before data leaves the DB | BLOB columns auto-stripped even if the agent writes `SELECT *` |
+
+### What I deliberately did NOT "clean"
+
+This part matters as much as the cleaning itself:
+
+- **NULL columns kept as-is** — `ShippedDate IS NULL` means "not shipped yet," not "missing data." `Employees.ReportsTo IS NULL` is the CEO. Imputing would destroy real business signal.
+- **Date timestamps left at their original 2012-2023 range** — I could have shifted everything to make the data "current," but lying about data freshness is worse than honestly disclosing the window. The system prompt tells the agent to interpret "last year" relative to the actual data window.
+- **No synthetic rows added to empty tables** — fabricating data to "fill" a 0-row table is data fraud, not cleaning.
+
+## Safety design
+
+The agent cannot modify, drop, or exfiltrate data — by construction:
+
+1. The validator (`src/sql_tools.py`) rejects anything that isn't a single `SELECT` statement
+2. A keyword allowlist catches `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, `REPLACE`, `ATTACH`, `DETACH`, `PRAGMA`, `VACUUM`
+3. Multi-statement queries (`SELECT ...; DELETE ...`) are rejected at parse time using `sqlparse`
+4. The DB connection opens in SQLite read-only mode (`?mode=ro`)
+5. Result size is capped at 100 rows to prevent token blowup back to the LLM
+6. BLOB columns are stripped from results as a defense-in-depth fallback
+
+All six are exercised in `smoke_test.py`, including a self-correction scenario where a mocked failed query gets retried with a corrected one.
 
 ## Run it locally
 
 ```bash
 # 1. Clone & enter
-git clone https://github.com/YOUR-USERNAME/askyourdata.git
+git clone https://github.com/jianingk-tan/askyourdata.git
 cd askyourdata
 
 # 2. Install dependencies
@@ -95,9 +147,9 @@ pip install -r requirements.txt
 
 # 3. Configure your API key
 cp .env.example .env
-# then edit .env and paste your key from https://console.anthropic.com/
+# edit .env and paste your key from https://console.anthropic.com/
 
-# 4. Build the sample database (one-time)
+# 4. Download the sample database (one-time, ~24 MB)
 python scripts/init_db.py
 
 # 5. (Optional) Audit the data
@@ -110,98 +162,11 @@ python smoke_test.py
 streamlit run app.py
 ```
 
-You can also run the agent from the command line:
+You can also run the agent from the command line, without the UI:
 
 ```bash
-python -m src.agent "Which sales rep closed the most deals in 2025?"
+python -m src.agent "Which employee closed the most orders?"
 ```
-
----
-
-## The dataset
-
-This uses Microsoft's classic **Northwind sample database**, ported to SQLite by [jpwhite3/northwind-SQLite3](https://github.com/jpwhite3/northwind-SQLite3) (MIT-licensed). Northwind is the canonical small-business ERP dataset — used in countless SQL tutorials, courses, and certification exams.
-
-Key tables the agent works with:
-
-| Table | Rows | Description |
-|---|---|---|
-| `Customers` | 93 | Companies and contacts across 21 countries |
-| `Orders` | 16,282 | Order header — customer, employee, shipper, dates, freight |
-| `Order Details` | 609,283 | Order line items with quantity, unit price, and discount |
-| `Products` | 77 | Across 8 categories — Beverages, Condiments, Dairy, etc. |
-| `Employees` | 9 | Sales reps and managers |
-| `Suppliers` | 29 | Across 16 countries |
-| `Shippers` | 3 | Logistics providers |
-| `Categories` | 8 | Product taxonomy |
-
-The order date range is **July 2012 – October 2023**, so "this month" / "last year" queries are interpreted relative to the data's actual time window, not real-world today.
-
-`scripts/init_db.py` downloads the database (~24 MB) on first run. After download, it's cached locally — subsequent runs are instant.
-
----
-
-## Data audit & cleaning
-
-Before connecting the agent to this dataset, I ran a six-pass audit. The full findings are in [`AUDIT_REPORT.md`](AUDIT_REPORT.md), regenerable any time with:
-
-```bash
-python scripts/audit_data.py              # print to terminal
-python scripts/audit_data.py --markdown   # also regenerate AUDIT_REPORT.md
-```
-
-The audit covers six dimensions:
-
-1. **Structural** — table sizes and emptiness
-2. **BLOB risk** — binary columns that could blow up the LLM's token budget
-3. **NULL distribution** — missing data in key columns
-4. **Type quirks** — values that don't match declared types
-5. **Referential integrity** — orphan records across foreign keys
-6. **Business rules** — sanity checks on quantities, dates, ranges
-
-### What I found and how I addressed it
-
-Rather than dump every issue into a "cleaning script" and silently mutate the data, I used a **three-layer defense** strategy:
-
-| Layer | What it does | Examples |
-|---|---|---|
-| **Prompt** | The agent is told about quirks upfront | "`Order Details` has a space — quote it"; "`Discontinued` is TEXT `'0'`/`'1'`"; "data ends 2023-10-28" |
-| **Schema** | Hidden tables/columns the agent never sees | Empty demographic tables; `Photo` and `Picture` BLOB columns |
-| **Result** | Final filter before data leaves SQLite | BLOB columns auto-stripped even on `SELECT *` |
-
-### What I deliberately did NOT "clean"
-
-- **NULL columns kept as-is** — `ShippedDate IS NULL` means "not shipped yet," not "missing data." `Employees.ReportsTo IS NULL` means CEO. Imputing would destroy real business signal.
-- **Date timestamps left at 2023** — I could have shifted everything forward to make the data "current," but lying to the user about data freshness is worse than honestly disclosing the window.
-- **No fake data added to empty tables** — `CustomerDemographics` is 0 rows. Synthesizing rows to "fix" it would be data fabrication.
-
----
-
-## Sample questions to try
-
-- _Which 5 customers brought in the most revenue?_
-- _What's the average order value by country?_
-- _Which employee closed the most orders?_
-- _Show me monthly revenue for the most recent 12 months in the data_
-- _Which product categories generate the highest revenue?_
-- _Which suppliers ship from outside North America?_
-- _What's the most expensive product that's currently discontinued?_
-
----
-
-## Safety design
-
-The agent **cannot** modify, drop, or exfiltrate data, because:
-
-1. The validator (`src/sql_tools.py`) rejects anything that isn't a single `SELECT` statement
-2. A keyword allowlist catches `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, `REPLACE`, `ATTACH`, `DETACH`, `PRAGMA`, `VACUUM`
-3. Multi-statement queries (`SELECT ...; DELETE ...`) are rejected at parse time
-4. The DB connection opens in SQLite read-only mode (`?mode=ro`)
-5. Result size is capped at 100 rows to prevent token blowup
-
-The smoke tests in `smoke_test.py` cover all of these.
-
----
 
 ## File layout
 
@@ -223,7 +188,22 @@ askyourdata/
 └── README.md
 ```
 
----
+## The dataset
+
+Microsoft's classic **Northwind sample database**, ported to SQLite by [jpwhite3/northwind-SQLite3](https://github.com/jpwhite3/northwind-SQLite3) (MIT-licensed). Northwind is the canonical small-business ERP dataset — used in countless SQL tutorials, courses, and certification exams.
+
+| Table | Rows | Description |
+|---|---|---|
+| `Customers` | 93 | Companies and contacts across 21 countries |
+| `Orders` | 16,282 | Order header — customer, employee, shipper, dates, freight |
+| `Order Details` | 609,283 | Order line items with quantity, unit price, and discount |
+| `Products` | 77 | Across 8 categories — Beverages, Condiments, Dairy, etc. |
+| `Employees` | 9 | Sales reps and managers |
+| `Suppliers` | 29 | Across 16 countries |
+| `Shippers` | 3 | Logistics providers |
+| `Categories` | 8 | Product taxonomy |
+
+The order date range is **July 2012 – October 2023**.
 
 ## License
 
