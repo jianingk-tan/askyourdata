@@ -122,6 +122,9 @@ CUSTOM_CSS = """
       border-color: #0F172A;
       text-align: center;
       font-weight: 500;
+      min-width: 140px;
+      padding: 0.55rem 1.5rem;
+      margin-top: 0.5rem;
   }
   .stButton button[kind="primary"]:hover {
       background: #C2410C;
@@ -224,18 +227,14 @@ st.markdown(
 
 # ---------- Input ----------
 
-col_input, col_button = st.columns([5, 1])
+question = st.text_input(
+    "Your question",
+    value=st.session_state.get("question", ""),
+    placeholder="e.g. Which products generated the most revenue last year?",
+    label_visibility="collapsed",
+)
 
-with col_input:
-    question = st.text_input(
-        "Your question",
-        value=st.session_state.get("question", ""),
-        placeholder="e.g. Which products generated the most revenue last year?",
-        label_visibility="collapsed",
-    )
-
-with col_button:
-    run = st.button("Analyze", type="primary", width=True)
+run = st.button("Analyze", type="primary", use_container_width=False)
 
 
 # ---------- Run the agent ----------
@@ -270,22 +269,18 @@ if run and question.strip():
     if last_result and last_result.get("rows"):
         df = pd.DataFrame(last_result["rows"])
 
+        # Chart first (visual impact), data table below
+        fig = auto_chart(df)
+        if fig is not None:
+            st.markdown("### Chart")
+            st.plotly_chart(fig, use_container_width=True)
+
         st.markdown("### Data")
-        c1, c2 = st.columns([1, 1])
-
-        with c1:
-            st.dataframe(df, width=True, hide_index=True)
-            if last_result.get("truncated"):
-                st.caption(
-                    f"Showing first 100 of {last_result['row_count']:,} rows."
-                )
-
-        with c2:
-            fig = auto_chart(df)
-            if fig is not None:
-                st.plotly_chart(fig, width=True)
-            else:
-                st.caption("_(No chart — result is a scalar or doesn't suit visualization.)_")
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        if last_result.get("truncated"):
+            st.caption(
+                f"Showing first 100 of {last_result['row_count']:,} rows."
+            )
 
     # ---------- SQL transparency ----------
     if result.sql_queries:
