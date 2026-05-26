@@ -21,6 +21,26 @@ from src.visualizer import auto_chart
 
 load_dotenv()
 
+# ---------- Auto-download database on first launch ----------
+# Streamlit Cloud doesn't have the 24 MB northwind.db file (it's gitignored).
+# Download it on first launch so the app works out of the box.
+
+DB_FILE = Path(__file__).resolve().parent / "data" / "northwind.db"
+if not DB_FILE.exists():
+    DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with st.spinner("First-time setup: downloading Northwind database (~24 MB)..."):
+        import urllib.request
+        try:
+            urllib.request.urlretrieve(
+                "https://github.com/jpwhite3/northwind-SQLite3/raw/main/dist/northwind.db",
+                DB_FILE,
+            )
+        except Exception as exc:
+            st.error(f"Failed to download database: {exc}")
+            st.stop()
+    st.success("Database ready! Refreshing...")
+    st.rerun()
+
 # ---------- Page config ----------
 
 st.set_page_config(
