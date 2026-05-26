@@ -1,0 +1,25 @@
+# Secrets
+.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Data — Northwind DB is 24 MB; users download it via scripts/init_db.py
+data/*.db
+
+# Note: AUDIT_REPORT.md IS committed — it's the visible artifact of the audit pass
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log
