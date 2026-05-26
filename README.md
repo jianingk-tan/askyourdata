@@ -3,7 +3,7 @@
 > An AI agent that turns plain-English business questions into validated SQL queries, executes them safely, and explains the results — with auto-generated charts.
 
 **Live demo:** [URL](https://askyourdata-hefctvtoh5w4kcgrkcmrzh.streamlit.app/)
-**Author:** Jianing Tan · [LinkedIn](www.linkedin.com/in/jianing-tan-7357aa229) · [Email](mailto:jianing.tan@outlook.com)
+**Author:** Jianing Tan · [LinkedIn](https://www.linkedin.com/in/jianing-tan-7357aa229) · [Email](mailto:jianing.tan@outlook.com)
 
 ![AskYourData demo — natural-language question, generated SQL, business insight, and auto-chart](docs/screenshot.png)
 
