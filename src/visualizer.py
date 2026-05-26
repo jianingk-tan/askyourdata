@@ -26,18 +26,55 @@ METRIC_KEYWORDS = (
 
 
 def _is_datetime_like(series: pd.Series) -> bool:
-    """Detect date columns even when they arrive as strings."""
+    """
+    Detect date/time columns even when they arrive as strings.
+
+    Handles common SQL outputs:
+      - Full timestamps: "2023-01-15 14:30:00"
+      - ISO dates:       "2023-01-15"
+      - Year-month:      "2023-01"   (e.g. from strftime('%Y-%m', ...))
+      - Year-quarter:    "2023-Q1"
+      - Year only:       "2023"
+    """
+    import re
+
     if pd.api.types.is_datetime64_any_dtype(series):
         return True
-    if series.dtype == object:
-        sample = series.dropna().head(20)
-        if sample.empty:
-            return False
-        try:
+    # Reject numeric columns — they shouldn't be treated as dates even if some
+    # year-only values (e.g. 2023) could technically parse as such.
+    if pd.api.types.is_numeric_dtype(series):
+        return False
+
+    sample = series.dropna().head(20)
+    if sample.empty:
+        return False
+
+    # Try pandas' parser first (handles most cases incl. "2023-01-15")
+    # Silence the "could not infer format" warning — we don't care about speed
+    # here, we only need to know whether it parses at all.
+    import warnings
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
             pd.to_datetime(sample, errors="raise")
+        return True
+    except Exception:
+        pass
+
+    # Fallback: regex patterns for common partial-date formats that
+    # pandas refuses to parse without a format hint.
+    patterns = [
+        r"^\d{4}-\d{2}$",                # 2023-01 (year-month)
+        r"^\d{4}-Q[1-4]$",               # 2023-Q1 (year-quarter)
+        r"^\d{4}-W\d{1,2}$",             # 2023-W05 (year-week)
+        r"^\d{4}$",                      # 2023 (year only)
+        r"^\d{4}/\d{2}$",                # 2023/01
+    ]
+    sample_strs = [str(v).strip() for v in sample]
+    for pattern in patterns:
+        if all(re.match(pattern, s) for s in sample_strs):
             return True
-        except Exception:
-            return False
+
     return False
 
 
@@ -146,7 +183,18 @@ def auto_chart(df: pd.DataFrame) -> go.Figure | None:
     date_col = next((c for c in df_plot.columns if _is_datetime_like(df_plot[c])), None)
     if date_col:
         try:
-            df_plot[date_col] = pd.to_datetime(df_plot[date_col])
+            # Handle YYYY-MM (no day) by appending -01 so pandas can parse it.
+            # Also handle YYYY-Q1 (year-quarter) by converting to a real period.
+            import re
+            sample_val = str(df_plot[date_col].dropna().iloc[0]).strip()
+            if re.match(r"^\d{4}-\d{2}$", sample_val):
+                df_plot[date_col] = pd.to_datetime(df_plot[date_col] + "-01")
+            elif re.match(r"^\d{4}$", sample_val):
+                df_plot[date_col] = pd.to_datetime(df_plot[date_col] + "-01-01")
+            elif re.match(r"^\d{4}-Q[1-4]$", sample_val):
+                df_plot[date_col] = pd.PeriodIndex(df_plot[date_col], freq="Q").to_timestamp()
+            else:
+                df_plot[date_col] = pd.to_datetime(df_plot[date_col])
             df_plot = df_plot.sort_values(date_col)
         except Exception:
             pass
