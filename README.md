@@ -205,6 +205,11 @@ Microsoft's classic **Northwind sample database**, ported to SQLite by [jpwhite3
 
 The order date range is **July 2012 – October 2023**.
 
+## Limitations
+1. The agent currently supports only single-turn conversations, which limits its ability to clarify KPI definitions with users, such as time ranges, calculation logic, or business-specific interpretations. As a result, it is more suitable for generating high-level snapshots or assisting with simple manual queries rather than handling complex analytical requests.
+2. Prompt engineering, data cleaning workflows, and data quality check processes need to be adjusted depending on the data source and schema. The system is not fully generalized across different datasets or business environments.
+3. The agent is unable to provide deep reasoning, advanced business insights, or sophisticated recommendations, and should therefore be considered a lightweight analytical assistant rather than a replacement for human analysts.
+
 ## License
 
 MIT
