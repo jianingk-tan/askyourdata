@@ -35,7 +35,7 @@ Each one exercises a different part of the system:
 | _"Which suppliers ship from outside North America?"_ | Geographic filtering + bar chart |
 | _"What's the most expensive product that's currently discontinued?"_ | Tricky type quirk — `Discontinued` is stored as TEXT `'1'`, not boolean |
 
-The data is **Microsoft's classic Northwind sample database** (93 customers, 16K orders, 609K line items), so business semantics are realistic — these aren't toy queries.
+The data is **Microsoft's classic Northwind sample database** (93 customers, 16K orders, 609K line items), so business semantics are realistic.
 
 ---
 
@@ -47,8 +47,6 @@ The data is **Microsoft's classic Northwind sample database** (93 customers, 16K
 4. Once the query succeeds, the agent writes a written business insight
 5. A chart is auto-generated based on the result shape (bar / line / scatter)
 6. The actual SQL is shown in a collapsible panel — full transparency
-
-The SQL exposure is intentional. AI tools that hide their reasoning aren't trustworthy in business contexts; this one shows its work.
 
 ---
 ---
@@ -89,7 +87,7 @@ The SQL exposure is intentional. AI tools that hide their reasoning aren't trust
 
 Python 3.11+ · Anthropic Python SDK · SQLite + sqlparse · Streamlit · Plotly · pandas
 
-Deployed on **Streamlit Community Cloud**. The 24 MB Northwind database is downloaded on first launch (kept out of git to follow real-world conventions where large datasets live in cloud storage, not version control).
+Deployed on **Streamlit Community Cloud**. The 24 MB Northwind database is downloaded on first launch.
 
 ## Data engineering — what I audited and what I deliberately left alone
 
@@ -104,7 +102,7 @@ python scripts/audit_data.py              # terminal output
 python scripts/audit_data.py --markdown   # regenerate AUDIT_REPORT.md
 ```
 
-### Three-layer defense (not one-time cleaning)
+### Three-layer defense
 
 Instead of mutating the source data, I addressed issues at three different layers:
 
