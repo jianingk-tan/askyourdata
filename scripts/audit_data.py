@@ -9,13 +9,19 @@ Runs six independent audit passes and reports findings:
   5. Integrity     - orphan records, broken foreign-key relationships
   6. Business      - rule violations, range checks, time-logic anomalies
 
+The passes are independent (no pass feeds the next) and each runs in
+isolation: if one pass raises, it is recorded as a HIGH-severity finding
+and the remaining passes still run. An audit tool must be resilient to the
+very problems it is meant to surface.
+
 Usage:
     python scripts/audit_data.py              # print to terminal
     python scripts/audit_data.py --markdown   # also write AUDIT_REPORT.md
 
-Exit code:
-    0 - audit ran successfully (regardless of findings)
-    1 - database not found or unreadable
+Exit codes:
+    0 - all passes ran successfully
+    1 - database not found or unreadable (cannot start)
+    2 - audit completed, but one or more passes failed (see HIGH findings)
 """
 
 import argparse
@@ -37,6 +43,8 @@ class AuditReport:
     """Collects findings from all audit passes."""
     lines: list[str] = field(default_factory=list)
     findings: list[dict[str, Any]] = field(default_factory=list)
+    passes_run: int = 0       # how many passes were attempted
+    passes_failed: int = 0    # how many passes raised an exception
 
     def section(self, title: str) -> None:
         self.lines.append("")
@@ -104,6 +112,39 @@ class AuditReport:
 
         full = summary_lines + self.lines
         path.write_text("\n".join(full), encoding="utf-8")
+
+
+# ---------- Pass isolation ----------
+
+def run_pass(pass_fn, pass_name: str, cur: sqlite3.Cursor,
+             report: AuditReport) -> None:
+    """
+    Run a single audit pass in isolation.
+
+    Each pass is independent and reads the same DB connection, so one pass
+    failing should NOT abort the rest of the audit — the whole point of an
+    audit tool is to surface problems, so it must be resilient to them.
+
+    On exception:
+      - the partial section output of the failed pass remains (best-effort)
+      - a HIGH-severity finding is recorded so the failure is visible in the summary
+      - passes_failed is incremented so the caller can set a non-zero exit code
+      - execution continues to the next pass
+    """
+    report.passes_run += 1
+    try:
+        pass_fn(cur, report)
+    except Exception as exc:  # noqa: BLE001 — we deliberately catch everything here
+        report.passes_failed += 1
+        report.text("")
+        report.text(f"> ⚠️ **This pass failed and was skipped:** `{type(exc).__name__}: {exc}`")
+        report.text("")
+        report.finding(
+            "HIGH", "Audit pass failure",
+            f"{pass_name} raised {type(exc).__name__}: {exc}",
+            resolution="The remaining passes still ran. Investigate this pass "
+                       "in isolation; the audit report is incomplete for this dimension.",
+        )
 
 
 # ---------- Audit passes ----------
@@ -511,13 +552,20 @@ def main() -> int:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
+    # Each pass runs in isolation — a failure in one is recorded as a HIGH
+    # finding and does not abort the others. (See run_pass.)
+    passes = [
+        (audit_structure, "Structural audit"),
+        (audit_blobs,     "BLOB scan"),
+        (audit_nulls,     "NULL profile"),
+        (audit_types,     "Type quirks"),
+        (audit_integrity, "Referential integrity"),
+        (audit_business,  "Business rules"),
+    ]
+
     try:
-        audit_structure(cur, report)
-        audit_blobs(cur, report)
-        audit_nulls(cur, report)
-        audit_types(cur, report)
-        audit_integrity(cur, report)
-        audit_business(cur, report)
+        for pass_fn, pass_name in passes:
+            run_pass(pass_fn, pass_name, cur, report)
         render_findings_summary(report)
     finally:
         conn.close()
@@ -529,6 +577,15 @@ def main() -> int:
         report.write_markdown(REPORT_PATH)
         print(f"\n📄 Markdown report written to: {REPORT_PATH}")
 
+    # Exit code semantics:
+    #   0 = all passes ran successfully
+    #   2 = audit completed but one or more passes failed (fail loudly in CI)
+    if report.passes_failed > 0:
+        print(
+            f"\n⚠️  {report.passes_failed} of {report.passes_run} passes failed. "
+            f"See the HIGH-severity findings above."
+        )
+        return 2
     return 0
 
 
